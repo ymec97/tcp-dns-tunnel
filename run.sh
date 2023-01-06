@@ -22,8 +22,7 @@ CLIENT_SCRIPT_NAME=client.py
 MIN_ARG_COUNT=1
 DID_SETUP=0
 EXECUTION_RES=0
-CLIENT_TUN_IP="10.8.0.1"
-SERVER_TUN_IP="10.8.0.2"
+TUN_IP="10.0.0.1"
 
 
 if [[ $# -lt $MIN_ARG_COUNT ]]
@@ -54,20 +53,32 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+function setup_tunif {
+  modprobe tun
+  ip tuntap add mode tun dev tun0
+  ip addr add "$TUN_IP"/24 dev tun0
+  ip link set dev tun0 up
+  ip link set mtu 1500 dev tun0
+}
+
+function cleanup_tunif {
+  ip tuntap del mode tun dev tun0
+}
+
 function cleanup_client {
 	echo "Cleaning up tunnel configuration as client"
 	set -x
 	ip rule delete fwmark 2 table 3
 	iptables -t mangle -D OUTPUT -p tcp -j MARK --set-mark 2
 	# iptables -t mangle -D PREROUTING -p dns -j MARK --set-mark 2
-	ip route delete default via "$CLIENT_TUN_IP" table 3
-	set +x
+	cleanup_tunif
 	echo "Client configuration cleaned"
 }
 
 function setup_client {
 	echo "Applying tunnel configuration as client"
 	set -x
+	setup_tunif
 	# Packets marked with 2 are routed by the rules described in table 3
 	ip rule add fwmark 2 table 3 || cleanup
 	DID_SETUP=1
@@ -75,7 +86,7 @@ function setup_client {
 	iptables -t mangle -A OUTPUT -p tcp -j MARK --set-mark 2 || cleanup
 	# iptables -t mangle -A PREROUTING -p dns -j MARK --set-mark 2 || cleanup
 	# Add tun0 ip as the default gw for table 3, so all tcp packets routed with table 3 will be routed to the tun interface
-	ip route add default via "$CLIENT_TUN_IP" table 3 || cleanup
+	ip route add default via "$TUN_IP" table 3 || cleanup
 	set +x
 	echo "Client configuration applied"
 }
@@ -83,9 +94,9 @@ function setup_client {
 function cleanup_server {
 	echo "Cleaning up tunnel configuration as server"
 	set -x
-	ip tuntap del mode tun tun0
 	ip rule delete fwmark 2 table 3
 	iptables -t mangle -D PREROUTING -p udp -m "udp" --dport 53 -j MARK --set-mark 2
+	cleanup_tunif	
 	set +x
 	echo "Server configuration cleaned"
 }
@@ -93,16 +104,13 @@ function cleanup_server {
 function setup_server {
 	echo "Applying tunnel configuration as server"
 	set -x
-	ip tuntap add mode tun tun0 || cleanup
+	setup_tunif
 	DID_SETUP=1
-	ip addr add $SERVER_TUN_IP/24 dev tun0 || cleanup
-	ip link set tun0 up || cleanup
-	ip link set mtu 1500 dev tun0 || cleanup
 	# Packets marked with 2 are routed by the rules described in table 3
 	ip rule add fwmark 2 table 3 || cleanup
 	iptables -t mangle -A PREROUTING -p udp -m "udp" --dport 53 -j MARK --set-mark 2 || cleanup
 	# sudo iptables -t nat -A PREROUTING -p udp -m "udp" --dport 53 -j DNAT --to-destination 127.0.0.1:53
-	ip route add default via "$SERVER_TUN_IP" table 3 || cleanup
+	ip route add default via "$TUN_IP" table 3 || cleanup
 	set +x
 	echo "Server configuration applied"
 }
