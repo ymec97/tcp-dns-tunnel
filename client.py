@@ -13,7 +13,7 @@ from scapy.layers.dns import DNS, DNSQR
 from scapy.layers.inet import IP, UDP
 from scapy.layers.l2 import Ether, ARP
 from scapy.packet import Raw
-from scapy.sendrecv import sr, send
+from scapy.sendrecv import sr, send, sr1, sendp
 
 # create a logger with the name of the current module
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 TUNNEL_INTERFACE = b"tun0"
-DST_IP = "192.168.150.129"
+DST_IP = "192.168.2.111"
 
 
 class TUNInterface:
@@ -76,19 +76,41 @@ def validate_state():
     return True
 
 
+def extract_wrapped_packet_bytes(packet):
+    return bytes(packet[Raw])
+
+
+def alter_packet_dst(packet):
+
+    local_machine = LocalMachine()
+    wrapped_packet_bytes = extract_wrapped_packet_bytes(packet)
+    # Using tun device on other tunnel side so no ethernet layer
+    wrapped_packet = Ether(dst=local_machine.my_mac, src=local_machine.gw_mac) / IP(wrapped_packet_bytes)
+    wrapped_packet["IP"].dst = local_machine.my_ip
+    for layer in wrapped_packet.layers():
+        if not hasattr(wrapped_packet[layer], "chksum"):
+            continue
+        del wrapped_packet[layer].chksum
+
+    return wrapped_packet
+
 def tcp_wrapper():
     interface = TUNInterface()
     while time.sleep(0.01) is None:
         buf = interface.read(1500)
         p = IP(buf)
-        if not p.haslayer("ICMP"):
+        if p[IP].src == "0.0.0.0":
             continue
-
-        dns_req = IP(dst=DST_IP) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(OUR_DNS_MAGIC)) / Raw(buf)
+        print(repr(p))
+        dns_req = IP(dst=DST_IP) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(buf)
         logger.debug(repr(p))
         print(repr(dns_req))
         print(repr(dns_req[DNSQR].qname))
-        answer = send(dns_req, verbose=1)
+        answer = sr1(dns_req, verbose=1)
+        print(repr(answer))
+        new_packet = alter_packet_dst(answer)
+        sendp(new_packet)
+
 
 def main():
     if not validate_state():

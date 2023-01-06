@@ -168,13 +168,13 @@ else
 fi
 
 
-#setup || exit 1
+setup || exit 1
 RUN_FROM_SCRIPT=true ./$SCRIPT_TO_RUN || EXECUTION_RES=$?
 if [[ $EXECUTION_RES -ne 0 ]]
 then
 	echo "Error running script"
 fi
-#cleanup || exit 1
+cleanup || exit 1
 
 
 exit 0
