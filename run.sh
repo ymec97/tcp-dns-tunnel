@@ -55,10 +55,10 @@ done
 
 function setup_tunif {
   modprobe tun
-  ip tuntap add mode tun dev tun0
-  ip addr add "$TUN_IP"/24 dev tun0
-  ip link set dev tun0 up
-  ip link set mtu 1500 dev tun0
+  ip tuntap add mode tun dev tun0 || cleanup
+  ip addr add "$TUN_IP"/24 dev tun0 || cleanup
+  ip link set dev tun0 up || cleanup
+  ip link set mtu 1500 dev tun0 || cleanup
 }
 
 function cleanup_tunif {
@@ -168,13 +168,13 @@ else
 fi
 
 
-setup || exit 1	
+#setup || exit 1
 RUN_FROM_SCRIPT=true ./$SCRIPT_TO_RUN || EXECUTION_RES=$?
 if [[ $EXECUTION_RES -ne 0 ]]
 then
 	echo "Error running script"
 fi
-cleanup || exit 1
+#cleanup || exit 1
 
 
 exit 0
