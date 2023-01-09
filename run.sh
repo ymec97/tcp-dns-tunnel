@@ -94,9 +94,11 @@ function setup_client {
 function cleanup_server {
 	echo "Cleaning up tunnel configuration as server"
 	set -x
-	ip rule delete fwmark 2 table 3
-	iptables -t mangle -D PREROUTING -p udp -m "udp" --dport 53 -j MARK --set-mark 2
-	cleanup_tunif	
+	iptables -t nat -D PREROUTING -p udp -m "udp" --dport 53 -j DNAT --to-destination 127.0.0.1:53
+	iptables -D OUTPUT -p tcp -m tcp --tcp-flags RST RST -j DROP
+#	ip rule delete fwmark 2 table 3
+#	iptables -t mangle -D PREROUTING -p udp -m "udp" --dport 53 -j MARK --set-mark 2
+#	cleanup_tunif
 	set +x
 	echo "Server configuration cleaned"
 }
@@ -104,13 +106,14 @@ function cleanup_server {
 function setup_server {
 	echo "Applying tunnel configuration as server"
 	set -x
-	setup_tunif
+#	setup_tunif
+  iptables -t nat -A PREROUTING -p udp -m "udp" --dport 53 -j DNAT --to-destination 127.0.0.1:53
+	iptables -A OUTPUT -p tcp -m tcp --tcp-flags RST RST -j DROP
 	DID_SETUP=1
 	# Packets marked with 2 are routed by the rules described in table 3
-	ip rule add fwmark 2 table 3 || cleanup
-	iptables -t mangle -A PREROUTING -p udp -m "udp" --dport 53 -j MARK --set-mark 2 || cleanup
-	# sudo iptables -t nat -A PREROUTING -p udp -m "udp" --dport 53 -j DNAT --to-destination 127.0.0.1:53
-	ip route add default via "$TUN_IP" table 3 || cleanup
+#	ip rule add fwmark 2 table 3 || cleanup
+#	iptables -t mangle -A PREROUTING -p udp -m "udp" --dport 53 -j MARK --set-mark 2 || cleanup
+#	ip route add default via "$TUN_IP" table 3 || cleanup
 	set +x
 	echo "Server configuration applied"
 }
