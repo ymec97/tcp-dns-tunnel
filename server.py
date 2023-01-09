@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+import base64
+
 import ipdb
 
 import logging
@@ -37,7 +39,6 @@ logger.addHandler(ch)
 
 
 class TunnelServer:
-    BPF_DNS_FILTER = "udp and port 53"
     TUNNEL_INTERFACE = "tun0"
 
     def __init__(self):
@@ -50,7 +51,9 @@ class TunnelServer:
         flags = LINUX_IFF_TUN | LINUX_IFF_NO_PI
         ifs = struct.pack("16sH22s", b"tun0", flags, b"")
         ioctl(self._descriptor, LINUX_TUNSETIFF, ifs)
+        self.bpf_dns_filter = f"udp and port 53 and src not {self.local_machine.my_ip}"
         logger.info("Server initialized")
+        logger.info(f"Listening to: {self.bpf_dns_filter}")
 
     @classmethod
     def our_dns_packet(cls, packet):
@@ -62,14 +65,14 @@ class TunnelServer:
         logger.info(f"Local machine information: {self.local_machine}")
         logger.info("Starting listening to tunnel packets")
         # From tunnel/real incoming dns packets
-        sniff(filter=self.BPF_DNS_FILTER, iface="ens33", prn=self.handle_dns_query)
+        sniff(filter=self.bpf_dns_filter, iface="ens33", prn=self.handle_dns_query)
 
     def handle_real_dns_packet(self, packet):
         sendp(Ether(dst=self.local_machine.gw_mac)/packet)
 
     @classmethod
     def extract_wrapped_packet_bytes(cls, packet):
-        return bytes(packet[Raw])
+        return base64.decodebytes(bytes(packet[Raw]))
 
     def alter_packet_origin(self, packet):
         wrapped_packet_bytes = self.extract_wrapped_packet_bytes(packet)
@@ -97,8 +100,11 @@ class TunnelServer:
         logger.info("our dns packet received")
         # Extract the query data from the packet
         altered_packet = self.alter_packet_origin(packet)
+        logger.info(f"Sending altered packet to: {altered_packet[IP].dst}")
         resp = srp1(altered_packet)
+        logger.info(f"Altered packet SENT: {altered_packet[IP].dst}")
         logger.info(resp)
+        resp_bytes = base64.encodebytes(bytes(resp[Ether].payload))
         dns = DNS(
         id=packet[DNS].id,
         qd=packet[DNS].qd,
@@ -115,7 +121,7 @@ class TunnelServer:
             ttl=600
             )
         )
-        dns_req = IP(dst=packet[IP].src) / UDP(dport=53) / dns / Raw(bytes(resp[Ether].payload))
+        dns_req = IP(dst=packet[IP].src) / UDP(dport=53) / dns / Raw(resp_bytes)
         answer = send(dns_req, verbose=1)
         logger.info("Sent data")
 
