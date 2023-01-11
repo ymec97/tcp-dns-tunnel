@@ -1,0 +1,23 @@
+from scapy.layers.inet import IP
+from collections import defaultdict
+
+def defragment(pkt):
+    if IP in pkt:
+        ip = pkt[IP]
+        if ip.flags & 0x1:
+            # Check if the MF bit is set
+            key = (ip.src, ip.dst, ip.id)
+            if key in fragments:
+                fragments[key].append(ip)
+            else:
+                fragments[key] = [ip]
+                fragments[key].sort(key=lambda x: x.frag)
+            if ip.flags & 0x2 == 0:
+                # Check if the DF bit is not set
+                frag_list = fragments.pop(key)
+                total_len = sum([x.len for x in frag_list])
+                return IP(raw(frag_list), len=total_len)
+    return pkt
+
+fragments = defaultdict(list)
+sniff(prn=defragment)
