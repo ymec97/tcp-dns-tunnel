@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import base64
+import copy
 
 import ipdb
 
@@ -10,23 +11,24 @@ import sys
 import os
 from fcntl import ioctl
 
-from scapy.config import conf
 from scapy.packet import Raw
-from scapy.sendrecv import sr, sniff, send, srp1, sendp
+from scapy.sendrecv import sniff, send, sendp
 
 from common import *
 
 from scapy.layers.dns import DNS, DNSRR, DNSQR
-from scapy.layers.inet import IP, UDP
-from scapy.layers.l2 import Ether, ARP
+from scapy.layers.inet import IP, UDP, TCP
+from scapy.layers.l2 import Ether
 
+
+log_level = logging.DEBUG
 logger = logging.getLogger(__name__)
 # set the log level to debug
-logger.setLevel(logging.DEBUG)
+logger.setLevel(log_level)
 
 # create a console handler and set the log level to debug
 ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
+ch.setLevel(log_level)
 
 # create a formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -38,9 +40,11 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
+from concurrent.futures import ThreadPoolExecutor
+
+VERBOSE=0
 class TunnelServer:
     TUNNEL_INTERFACE = "tun0"
-
     def __init__(self):
         logger.info("Starting server initialization")
         self.local_machine = LocalMachine()
@@ -51,9 +55,12 @@ class TunnelServer:
         flags = LINUX_IFF_TUN | LINUX_IFF_NO_PI
         ifs = struct.pack("16sH22s", b"tun0", flags, b"")
         ioctl(self._descriptor, LINUX_TUNSETIFF, ifs)
-        self.bpf_dns_filter = f"udp and port 53 and src not {self.local_machine.my_ip}"
+        self.dns_bpf_filter = f"udp and port 53 and src not {self.local_machine.my_ip}"
+        self.tcp_bpf_filter = f"tcp and src not {self.local_machine.my_ip}"
+        self.active_session_mapping = {}
         logger.info("Server initialized")
-        logger.info(f"Listening to: {self.bpf_dns_filter}")
+        logger.info(f"Listening to: {self.dns_bpf_filter}")
+
 
     @classmethod
     def our_dns_packet(cls, packet):
@@ -61,14 +68,32 @@ class TunnelServer:
             return False
         return True
 
+    def is_for_active_session(self, packet):
+        if packet[TCP].dport in self.active_session_mapping.keys():
+            return True
+        return False
+
+    def tunnel_response_tcp_packet(self, packet):
+        if not packet.haslayer(TCP) or not self.is_for_active_session(packet):
+            return False
+        return True
+
+    def _listen_dns(self):
+        """ From tunnel/real incoming dns packets """
+        logger.info("Starting listening to tunnel dns packets")
+        sniff(filter=self.dns_bpf_filter, iface="ens33", prn=self.handle_dns_query)
+
+    def _listen_tcp(self):
+        logger.info("Starting listening to tcp response packets")
+        """ From tunnel/real incoming dns packets """
+        sniff(filter=self.tcp_bpf_filter, iface="ens33", prn=self.handle_tcp_response)
+
+
     def serve(self):
         logger.info(f"Local machine information: {self.local_machine}")
-        logger.info("Starting listening to tunnel packets")
-        # From tunnel/real incoming dns packets
-        sniff(filter=self.bpf_dns_filter, iface="ens33", prn=self.handle_dns_query)
-
-    def handle_real_dns_packet(self, packet):
-        sendp(Ether(dst=self.local_machine.gw_mac)/packet)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            executor.submit(self._listen_dns)
+            executor.submit(self._listen_tcp)
 
     @classmethod
     def extract_wrapped_packet_bytes(cls, packet):
@@ -78,7 +103,7 @@ class TunnelServer:
         wrapped_packet_bytes = self.extract_wrapped_packet_bytes(packet)
         # Using tun device on other tunnel side so no ethernet layer
         wrapped_packet = Ether(src=self.local_machine.my_mac, dst=self.local_machine.gw_mac) / IP(wrapped_packet_bytes)
-        wrapped_packet["IP"].src = self.local_machine.my_ip
+        wrapped_packet[IP].src = self.local_machine.my_ip
         for layer in wrapped_packet.layers():
             if not hasattr(wrapped_packet[layer], "chksum"):
                 continue
@@ -87,43 +112,79 @@ class TunnelServer:
 
         return wrapped_packet
 
-    def handle_dns_query(self, packet):
-        logger.info("Handling packet")
-        # Check if the packet is a DNS query
-        if not packet.haslayer(DNSQR):
-            logger.info("non dns packet received")
+    def handle_real_packet_to_server(self, packet):
+        sendp(Ether(dst=self.local_machine.gw_mac)/packet, verbose=VERBOSE)
+
+    def get_resp_data_from_active_sessions(self, packet):
+        return self.active_session_mapping[packet[TCP].dport]
+
+    def handle_tcp_response(self, packet):
+        logger.info("Handling tcp response packet")
+        if not self.tunnel_response_tcp_packet(packet):
+            logger.info("non tunnel tcp response packet received")
+            self.handle_real_packet_to_server(packet)
             return
-        if not self.our_dns_packet(packet):
-            logger.info("real dns packet received")
-            self.handle_real_dns_packet(packet)
-            return
-        logger.info("our dns packet received")
-        # Extract the query data from the packet
-        altered_packet = self.alter_packet_origin(packet)
-        logger.info(f"Sending altered packet to: {altered_packet[IP].dst}")
-        resp = srp1(altered_packet)
-        logger.info(f"Altered packet SENT: {altered_packet[IP].dst}")
-        logger.info(resp)
-        resp_bytes = base64.encodebytes(bytes(resp[Ether].payload))
-        dns = DNS(
-        id=packet[DNS].id,
-        qd=packet[DNS].qd,
-        aa=1,
-        rd=0,
-        qr=1,
-        qdcount=1,
-        ancount=1,
-        nscount=0,
-        arcount=0,
-        ar=DNSRR(
-            rrname=packet[DNS].qd.qname,
-            type='A',
-            ttl=600
+        try:
+            logger.info("tunnel response tcp packet received")
+            resp_bytes = base64.encodebytes(bytes(packet[Ether].payload))
+            resp_data = copy.deepcopy(self.get_resp_data_from_active_sessions(packet))
+            dns = resp_data[DNS]
+            resp_data.remove_payload()
+            ip = resp_data[IP]
+            dns_req = IP(dst=ip[IP].src) / UDP(dport=53) / dns / Raw(resp_bytes)
+            logger.info(f"Sending response dns packet from {packet[IP].src}, length is: {len(dns_req)}")
+            send(dns_req, verbose=VERBOSE)
+            logger.info(f"Sent dns response packet from {packet[IP].src}")
+        except:
+            ipdb.post_mortem()
+
+    def add_packet_to_active_session(self, dns_packet, tcp_packet):
+        src_port = tcp_packet[TCP].sport
+        if src_port in self.active_session_mapping.keys():
+            # logger.error(f"Session for sport {src_port} already exists")
+            # return False
+            return True
+
+        resp_data = IP(src=dns_packet[IP].src)/DNS(
+            id=dns_packet[DNS].id,
+            qd=dns_packet[DNS].qd,
+            aa=1,
+            rd=0,
+            qr=1,
+            qdcount=1,
+            ancount=1,
+            nscount=0,
+            arcount=0,
+            ar=DNSRR(
+                rrname=dns_packet[DNS].qd.qname,
+                type='A',
+                ttl=600
             )
         )
-        dns_req = IP(dst=packet[IP].src) / UDP(dport=53) / dns / Raw(resp_bytes)
-        answer = send(dns_req, verbose=1)
-        logger.info("Sent data")
+        self.active_session_mapping[src_port] = resp_data
+        return True
+
+    def handle_dns_query(self, dns_packet):
+        logger.info("Handling dns_packet")
+        # Check if the dns_packet is a DNS query
+        if not dns_packet.haslayer(DNSQR):
+            logger.info("non dns dns_packet received")
+            return
+        if not self.our_dns_packet(dns_packet):
+            logger.info("real dns dns_packet received")
+            self.handle_real_packet_to_server(dns_packet)
+            return
+        logger.info("our dns dns_packet received")
+        # Extract the query data from the dns_packet
+        tcp_packet = self.alter_packet_origin(dns_packet)
+        logger.info(f"Sending altered dns_packet to: {tcp_packet[IP].dst}")
+        sendp(tcp_packet, verbose=VERBOSE)
+        logger.info(f"Altered dns_packet SENT: {tcp_packet[IP].dst}")
+        if not self.add_packet_to_active_session(dns_packet, tcp_packet):
+            logger.error(f"Failed creating active session for packet from sport {tcp_packet[TCP].sport} - not listening for replies")
+
+
+
 
 
 
