@@ -1,19 +1,22 @@
 #!/usr/bin/python3
-
+import base64
 import logging
 import struct
 import sys
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from fcntl import ioctl
-from common import *
 
-from scapy.config import conf
+from scapy.sessions import IPSession
+
+from common import *
+from scapy.compat import raw
 from scapy.layers.dns import DNS, DNSQR
-from scapy.layers.inet import IP, UDP
-from scapy.layers.l2 import Ether, ARP
+from scapy.layers.inet import IP, UDP, TCP
+from scapy.layers.l2 import Ether
 from scapy.packet import Raw
-from scapy.sendrecv import sr, send, sr1, sendp
+from scapy.sendrecv import send, sendp, sniff
 
 # create a logger with the name of the current module
 logger = logging.getLogger(__name__)
@@ -51,21 +54,22 @@ class TUNInterface:
 
     def read(self, number_bytes: int) -> bytes:
         packet = self._descriptor.read(number_bytes)
-        logger.debug('Read %d bytes from %s: %s', len(packet), TUNNEL_INTERFACE, packet)
+        # logger.debug('Read %d bytes from %s: %s', len(packet), TUNNEL_INTERFACE, packet)
         return packet
 
     def write(self, packet: bytes) -> None:
-        logger.debug('Writing %s bytes to %s: %s', len(packet), TUNNEL_INTERFACE, packet[:10])
-        self._descriptor.write(packet)
-
+        # logger.debug('Writing %s bytes to %s: %s', len(packet), TUNNEL_INTERFACE, repr(packet))
+        self._descriptor.write(raw(packet[Ether].payload))
 
 
 def running_from_script():
     return os.getenv("RUN_FROM_SCRIPT") == "true"
 
+
 def running_as_root():
     return os.getuid() == 0
-    
+
+
 def validate_state():
     if not running_from_script():
         logger.error("Not running from script. Please use run.sh to run the program")
@@ -77,7 +81,7 @@ def validate_state():
 
 
 def extract_wrapped_packet_bytes(packet):
-    return bytes(packet[Raw])
+    return base64.decodebytes(bytes(packet[Raw]))
 
 
 def alter_packet_dst(packet):
@@ -94,22 +98,47 @@ def alter_packet_dst(packet):
 
     return wrapped_packet
 
+
 def tcp_wrapper():
     interface = TUNInterface()
-    while time.sleep(0.01) is None:
-        buf = interface.read(1500)
-        p = IP(buf)
-        if p[IP].src == "0.0.0.0":
-            continue
-        print(repr(p))
-        dns_req = IP(dst=DST_IP) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(buf)
-        logger.debug(repr(p))
-        print(repr(dns_req))
-        print(repr(dns_req[DNSQR].qname))
-        answer = sr1(dns_req, verbose=1)
-        print(repr(answer))
-        new_packet = alter_packet_dst(answer)
-        sendp(new_packet)
+
+    def send_thread():
+        while time.sleep(0.01) is None:
+            buf = interface.read(1500)
+            p = IP(buf)
+            if not p[IP].haslayer(TCP):
+                continue
+
+            logger.info("Handling outgoing packet")
+            dns_req = IP(dst=DST_IP) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(base64.encodebytes(buf))
+            logger.debug(f"Original packet:\n {repr(p)}\n")
+            logger.debug(f"Crafted DNS packet:\n {repr(dns_req)}\n")
+            send(dns_req, verbose=False)
+
+    def recv_thread():
+        local_machine = LocalMachine()
+
+        def handle_dns_query(packet):
+            logger.info("Handling incoming DNS packet")
+            # Check if the packet is a DNS query
+            if not packet.haslayer(DNSQR):
+                logger.info("non dns packet received")
+                return
+            if not packet[DNSQR].qname.decode().startswith(OUR_DNS_MAGIC) or not packet.haslayer(Raw):
+                logger.info("real dns packet received")
+                sendp(Ether(dst=local_machine.gw_mac) / packet, verbose=False)
+                return
+
+            # Extract the query data from the packet
+            new_packet = alter_packet_dst(packet)
+            logger.debug(f"Answer packet:\n {repr(new_packet)}\n")
+            interface.write(new_packet)
+
+        sniff(session=IPSession, filter=f"ip and src not {local_machine.my_ip}", prn=handle_dns_query)
+
+    with ThreadPoolExecutor(max_workers=10, thread_name_prefix='tun-') as pool:
+        pool.submit(send_thread)
+        pool.submit(recv_thread)
 
 
 def main():
@@ -117,7 +146,6 @@ def main():
         sys.exit(1)
 
     tcp_wrapper()
-
 
 
 if __name__ == '__main__':
