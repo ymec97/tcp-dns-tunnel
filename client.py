@@ -1,4 +1,15 @@
 #!/usr/bin/python3
+"""
+Module for the client side of the tunnel
+
+This module runs 2 threads:
+    * send_thread - This thread is listening on the tun0 interface.
+                    for every packet it reads from the interface the thread create dns query packet, concatenate
+                    the packet it read with the dns packet and send the dns packet to the server.
+    * recv_thread - This thread is listening on the interface that has access to the network.
+                    for every packet that it reads that came from the server the thread extract from it the actual
+                    answer and write it back to the tun interface.
+"""
 import base64
 import logging
 import struct
@@ -42,8 +53,19 @@ DST_IP = "192.168.2.111"
 
 
 class TUNInterface:
+    """
+    Class that encapsulate the access for the tun interface
+
+    Attributes:
+        _descriptor (IO): The file descriptor for the interface
+    """
 
     def __init__(self):
+        """
+        The constractor for the class.
+
+        Opens the file descriptor of the tun0 interface
+        """
         self._descriptor = open("/dev/net/tun", "r+b", buffering=0)
         LINUX_IFF_TUN = 0x0001
         LINUX_IFF_NO_PI = 0x1000
@@ -53,39 +75,55 @@ class TUNInterface:
         ioctl(self._descriptor, LINUX_TUNSETIFF, ifs)
 
     def read(self, number_bytes: int) -> bytes:
+        """
+        Reads number_bytes from the tun interface
+
+        Args:
+            number_bytes: number of bytes to read
+
+        Returns:
+            bytes: bytes we read
+        """
         packet = self._descriptor.read(number_bytes)
-        # logger.debug('Read %d bytes from %s: %s', len(packet), TUNNEL_INTERFACE, packet)
         return packet
 
     def write(self, packet: bytes) -> None:
-        # logger.debug('Writing %s bytes to %s: %s', len(packet), TUNNEL_INTERFACE, repr(packet))
+        """
+        Writes packet back to the tun interface
+
+        Args:
+            packet (bytes): packet in bytes representation
+        """
         self._descriptor.write(raw(packet[Ether].payload))
 
 
-def running_from_script():
-    return os.getenv("RUN_FROM_SCRIPT") == "true"
-
-
-def running_as_root():
-    return os.getuid() == 0
-
-
-def validate_state():
-    if not running_from_script():
-        logger.error("Not running from script. Please use run.sh to run the program")
-        return False
-    if not running_as_root():
-        logger.error("Not running as sudo. Please use run.sh to run the program")
-        return False
-    return True
-
-
 def extract_wrapped_packet_bytes(packet):
+    """
+    Extract the actual data from the dns packet
+
+    Args:
+        packet: the dns packet we use as tunnel
+
+    Returns:
+        the actual bytes of the tcp packet
+    """
     return base64.decodebytes(bytes(packet[Raw]))
 
 
 def alter_packet_dst(packet):
+    """
+    Change the packet dst addresses (mac and ip)
 
+    This function is used on the recv_thread, the answers that we get from the server are with the server as
+    the destination, so in order for the applications that run on the client host to accept the answers we need
+    to change the destination to be ourselves.
+
+    Args:
+        packet: the dns packet that contains the answer
+
+    Returns:
+        packet: the answer after changing the dst to be ourselves
+    """
     local_machine = LocalMachine()
     wrapped_packet_bytes = extract_wrapped_packet_bytes(packet)
     # Using tun device on other tunnel side so no ethernet layer
@@ -100,9 +138,18 @@ def alter_packet_dst(packet):
 
 
 def tcp_wrapper():
+    """
+    the client side tunnel
+
+    Runs the send_thread and recv_thread that responsible for wrapping the outgoing tcp traffic with dns packet
+    and extract the answers from the incoming dns packets.
+    """
     interface = TUNInterface()
 
     def send_thread():
+        """
+        Listen on the tun interface and send every packet wrapped with dns packet
+        """
         while time.sleep(0.01) is None:
             buf = interface.read(1500)
             p = IP(buf)
@@ -116,9 +163,19 @@ def tcp_wrapper():
             send(dns_req, verbose=False)
 
     def recv_thread():
+        """
+
+        Listen on the main interface and every packet that came from the server is extract the answer and
+        change the dst addresses and writes it back to the tun interface.
+        """
         local_machine = LocalMachine()
 
         def handle_dns_query(packet):
+            """
+            Make sure the packet is from the server and handel it accordingly.
+            Args:
+                packet: Incoming packet
+            """
             logger.info("Handling incoming DNS packet")
             # Check if the packet is a DNS query
             if not packet.haslayer(DNSQR):
@@ -142,7 +199,10 @@ def tcp_wrapper():
 
 
 def main():
-    if not validate_state():
+    """
+    Main entry point of the client side tunnel.
+    """
+    if not validate_state(logger):
         sys.exit(1)
 
     tcp_wrapper()

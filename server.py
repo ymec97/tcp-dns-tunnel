@@ -1,4 +1,14 @@
 #!/usr/bin/python3
+"""
+Module for the server side of the tunnel
+
+This module runs 2 threads:
+    * listen_dns - This thread is listening on the for incoming dns packets.
+                    For every dns packet that is part of the tunnel extract the tcp packet alter it so the server
+                    will get the response (change the src addresses) and send the altered packet.
+    * listen_tcp - This thread is listening for incoming tcp packets, if the packet is part of an active client session
+                    wrapp the tcp with dns response and send it back to the client.
+"""
 import base64
 import copy
 import threading
@@ -6,11 +16,8 @@ import threading
 import ipdb
 
 import logging
-import struct
 
 import sys
-import os
-from fcntl import ioctl
 
 from scapy.packet import Raw
 from scapy.sendrecv import sniff, send, sendp
@@ -21,6 +28,7 @@ from scapy.layers.dns import DNS, DNSRR, DNSQR
 from scapy.layers.inet import IP, UDP, TCP
 from scapy.layers.l2 import Ether
 
+from concurrent.futures import ThreadPoolExecutor
 
 log_level = logging.DEBUG
 logger = logging.getLogger(__name__)
@@ -40,58 +48,107 @@ ch.setFormatter(formatter)
 # add the console handler to the logger
 logger.addHandler(ch)
 
+VERBOSE = 0
 
-from concurrent.futures import ThreadPoolExecutor
 
-VERBOSE=0
 class TunnelServer:
+    """
+    Class that encapsulate the server side tunnel
+
+
+    Attributes:
+        source_client:
+        local_machine:
+        dns_bpf_filter: filter that used inorder to catch only dns packet that the server is the destination
+        tcp_bpf_filter: filter that used inorder to catch tcp packets that the server is the destination
+        active_session_mapping:
+    """
     TUNNEL_INTERFACE = "tun0"
+
     def __init__(self):
+        """
+        The constractor for the class.
+
+        Initialize all the attributes for proper running of the tunnel server
+        """
         self.source_client = ""
         logger.info("Starting server initialization")
         self.local_machine = LocalMachine()
-        self._descriptor = open("/dev/net/tun", "r+b", buffering=0)
-        LINUX_IFF_TUN = 0x0001
-        LINUX_IFF_NO_PI = 0x1000
-        LINUX_TUNSETIFF = 0x400454CA
-        flags = LINUX_IFF_TUN | LINUX_IFF_NO_PI
-        ifs = struct.pack("16sH22s", b"tun0", flags, b"")
-        ioctl(self._descriptor, LINUX_TUNSETIFF, ifs)
         self.dns_bpf_filter = f"udp and port 53 and src not {self.local_machine.my_ip}"
         self.tcp_bpf_filter = f"tcp and dst {self.local_machine.my_ip}"
         self.active_session_mapping = []
         logger.info("Server initialized")
         logger.info(f"Listening to: {self.dns_bpf_filter}")
 
-
     @classmethod
     def our_dns_packet(cls, packet):
+        """
+        Make sure the dns packet is from the client
+
+        Parameters:
+            packet: Incoming dns packet
+
+        Returns:
+            bool: whether the packet is from the client
+        """
         if not packet[DNSQR].qname.decode().startswith(OUR_DNS_MAGIC) or not packet.haslayer(Raw):
             return False
         return True
 
     def is_for_active_session(self, packet):
+        """
+        Make sure the tcp packet is part of an active client session
+
+        Parameters:
+            packet: Incoming tcp packet
+
+        Returns:
+            bool: whether the packet is part of active session
+        """
         if packet[TCP].dport in self.active_session_mapping:
             return True
         return False
 
     def tunnel_response_tcp_packet(self, packet):
+        """
+        Make sure the packet is tcp packet and is part of an active client session
+
+        Parameters:
+           packet: Incoming packet
+
+        Returns:
+           bool: whether the packet is tcp and part of active session
+        """
         if not packet.haslayer(TCP) or not self.is_for_active_session(packet):
             return False
         return True
 
     def _listen_dns(self):
+        """
+        Listen for incoming dns packets
+
+        For every incoming dns packet calls handle_dns_query
+        """
         """ From tunnel/real incoming dns packets """
         logger.info("Starting listening to tunnel dns packets")
         sniff(filter=self.dns_bpf_filter, iface="ens33", prn=self.handle_dns_query)
 
     def _listen_tcp(self):
+        """
+        Listen for incoming tcp packets
+
+        For every incoming tcp packet calls handle_tcp_response
+        """
         logger.info("Starting listening to tcp response packets")
         """ From tunnel/real incoming dns packets """
         sniff(filter=self.tcp_bpf_filter, iface="ens33", prn=self.handle_tcp_response)
 
-
     def serve(self):
+        """
+        The server side tunnel
+
+        Runs _listen_dns and _listen_tcp as threads.
+        """
         logger.info(f"Local machine information: {self.local_machine}")
         logger.critical(f"Active threads: {threading.active_count()}")
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -100,9 +157,31 @@ class TunnelServer:
 
     @classmethod
     def extract_wrapped_packet_bytes(cls, packet):
+        """
+        Extract the actual data from the dns packet
+
+        Args:
+            packet: the dns packet we use as tunnel
+
+        Returns:
+            the actual bytes of the tcp packet
+        """
         return base64.decodebytes(bytes(packet[Raw]))
 
     def alter_packet_origin(self, packet):
+        """
+        Change the packet src addresses (mac and ip)
+
+        This function is used when incoming dns packet is handled.
+        Inorder to properly send the client tcp packet we need to change the src ip and mac to be our, and update the
+        checksum accordingly.
+
+        Args:
+            packet: the dns packet that contains the tcp packet
+
+        Returns:
+            packet: the tcp packet that is ready to sent
+        """
         wrapped_packet_bytes = self.extract_wrapped_packet_bytes(packet)
         # Using tun device on other tunnel side so no ethernet layer
         wrapped_packet = Ether(src=self.local_machine.my_mac, dst=self.local_machine.gw_mac) / IP(wrapped_packet_bytes)
@@ -116,11 +195,24 @@ class TunnelServer:
         return wrapped_packet
 
     def handle_real_packet_to_server(self, packet):
-        sendp(Ether(dst=self.local_machine.gw_mac)/packet, verbose=VERBOSE)
+        """
+        Send real dns packets (not tunnel ones) to the system to handle.
+
+        Inorder to prevent automatic response on tunnel related dns requests all the incoming dns packets are
+        transferred to the localhost. If we get real dns request (and not one from the tunnel) pass it back to the
+        system to handle.
+
+        Args:
+              packet: Incoming dns packet
+        """
+        sendp(Ether(dst=self.local_machine.gw_mac) / packet, verbose=VERBOSE)
 
     def get_resp_data_from_active_sessions(self):
+        """
+        Not sure
+        """
 
-        return IP(src=self.source_client)/DNS(
+        return IP(src=self.source_client) / DNS(
             id=0,
             qd=DNSQR(qname=OUR_DNS_MAGIC + "."),
             aa=1,
@@ -131,23 +223,35 @@ class TunnelServer:
             nscount=0,
             arcount=0,
             ar=DNSRR(
-                rrname= "DEADBEEF.".encode(),
+                rrname="DEADBEEF.".encode(),
                 type='A',
                 ttl=600
             )
         )
 
     def remove_from_active_sessions(self, packet):
+        """
+        Not sure
+        """
         port_id = packet[TCP].dport
         if port_id in self.active_session_mapping:
             self.active_session_mapping.remove(port_id)
 
     def handle_tcp_response(self, packet):
+        """
+        Send tcp response back to the client.
+
+        For every tcp packet only handle it if it is part of an active client session.
+        If the tcp is part of an active session then create DNS response packet tht encapsulates the tcp response
+        and send ot to the appropriate client.
+
+        Args:
+            packet: Incoming tcp packet
+        """
         try:
             logger.info("Handling tcp response packet")
             if not self.tunnel_response_tcp_packet(packet):
                 logger.info("non tunnel tcp response packet received")
-                self.handle_real_packet_to_server(packet)
                 return
             logger.info("tunnel response tcp packet received")
             resp_bytes = base64.encodebytes(bytes(packet[Ether].payload))
@@ -166,11 +270,24 @@ class TunnelServer:
             ipdb.post_mortem()
 
     def add_packet_to_active_session(self, tcp_packet):
+        """
+            Not sure
+        """
         src_port = tcp_packet[TCP].sport
         if src_port not in self.active_session_mapping:
             self.active_session_mapping.append(src_port)
 
     def handle_dns_query(self, dns_packet):
+        """
+        Send tcp packet from the client to the wanted destination.
+
+        For every dns packet only handle it if it is part of the tunnel (has the tunnel magic)
+        If the packet is part of the tunnel extract from it the actual tcp packet, alter the packet to it looked as if
+        the server is the one sending it.
+
+        Args:
+            dns_packet: Incoming tcp packet
+        """
         logger.info("Handling dns_packet")
         # Check if the dns_packet is a DNS query
         if not dns_packet.haslayer(DNSQR):
@@ -193,33 +310,11 @@ class TunnelServer:
         self.add_packet_to_active_session(tcp_packet)
 
 
-
-
-
-
-
-
-
-def running_from_script():
-    return os.getenv("RUN_FROM_SCRIPT") == "true"
-
-
-def running_as_root():
-    return os.getuid() == 0
-
-
-def validate_state():
-    if not running_from_script():
-        logger.error("Not running from script. Please use run.sh to run the program")
-        return False
-    if not running_as_root():
-        logger.error("Not running as sudo. Please use run.sh to run the program")
-        return False
-    return True
-
-
 def main():
-    if not validate_state():
+    """
+    Main entry point of the server side tunnel.
+    """
+    if not validate_state(logger):
         sys.exit(1)
     server = TunnelServer()
     server.serve()

@@ -1,9 +1,54 @@
+"""
+Module that contains shared utils
+
+The utils are:
+    Retrieving the IP and mac addresses of the machin we're running on.
+    Retrieving the IP and mac addresses of our gateway.
+    Holds the magic we use to identify dns massages between the client and the server.
+"""
+import os
+
 from scapy.config import conf
 from scapy.layers.l2 import Ether, ARP
 from scapy.sendrecv import sr
 
 
 OUR_DNS_MAGIC = "DEADBEEF"
+
+def running_from_script():
+    """
+    Validates that the client was called from within the run.sh script
+
+    Returns:
+        bool: whether we are running from the script
+    """
+    return os.getenv("RUN_FROM_SCRIPT") == "true"
+
+
+def running_as_root():
+    """
+    Validates that the client has root privileges
+
+    Returns:
+        bool: whether we are running as root
+    """
+    return os.getuid() == 0
+
+
+def validate_state(logger):
+    """
+    Validates that both running_as_root and running_from_script are valid
+
+    Returns:
+        bool: whether both of them are valid
+    """
+    if not running_from_script():
+        logger.error("Not running from script. Please use run.sh to run the program")
+        return False
+    if not running_as_root():
+        logger.error("Not running as sudo. Please use run.sh to run the program")
+        return False
+    return True
 
 
 class LocalMachine:
