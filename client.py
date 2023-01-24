@@ -49,6 +49,7 @@ logger.addHandler(ch)
 
 TUNNEL_INTERFACE = b"tun0"
 
+
 class TUNInterface:
     """
     Class that encapsulate the access for the tun interface
@@ -190,9 +191,10 @@ def tcp_wrapper(server_ip):
 
         sniff(session=IPSession, filter=f"ip and src not {local_machine.my_ip}", prn=handle_dns_query)
 
+
     with ThreadPoolExecutor(max_workers=10, thread_name_prefix='tun-') as pool:
-        pool.submit(send_thread)
         pool.submit(recv_thread)
+        pool.submit(send_thread)
 
 
 def main():
