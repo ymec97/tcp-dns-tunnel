@@ -189,8 +189,11 @@ def tcp_wrapper(server_ip):
             logger.debug(f"Answer packet:\n {repr(new_packet)}\n")
             interface.write(new_packet)
 
-        sniff(session=IPSession, filter=f"ip and src not {local_machine.my_ip}", prn=handle_dns_query)
-
+        while True:
+                try:
+                    sniff(session=IPSession, filter=f"ip and src not {local_machine.my_ip}", prn=handle_dns_query)
+                except Exception as e:
+                    print(e)
 
     with ThreadPoolExecutor(max_workers=10, thread_name_prefix='tun-') as pool:
         pool.submit(recv_thread)

@@ -17,7 +17,7 @@ OUR_DNS_MAGIC = "DEADBEEF"
 
 def running_from_script():
     """
-    Validates that the client was called from within the run.sh script
+    Validates that the client/server was called from within the run.sh script
 
     Returns:
         bool: whether we are running from the script
@@ -27,7 +27,7 @@ def running_from_script():
 
 def running_as_root():
     """
-    Validates that the client has root privileges
+    Validates that the client/server has root privileges
 
     Returns:
         bool: whether we are running as root
