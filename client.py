@@ -48,8 +48,6 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 TUNNEL_INTERFACE = b"tun0"
-DST_IP = "192.168.2.111"
-
 
 class TUNInterface:
     """
@@ -136,7 +134,7 @@ def alter_packet_dst(packet):
     return wrapped_packet
 
 
-def tcp_wrapper():
+def tcp_wrapper(server_ip):
     """
     the client side tunnel
 
@@ -156,7 +154,7 @@ def tcp_wrapper():
                 continue
 
             logger.info("Handling outgoing packet")
-            dns_req = IP(dst=DST_IP) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(base64.encodebytes(buf))
+            dns_req = IP(dst=server_ip) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(base64.encodebytes(buf))
             logger.debug(f"Original packet:\n {repr(p)}\n")
             logger.debug(f"Crafted DNS packet:\n {repr(dns_req)}\n")
             send(dns_req, verbose=False)
@@ -201,10 +199,15 @@ def main():
     """
     Main entry point of the client side tunnel.
     """
+    client_arg_count = 2
+    server_ip_arg_index = 1
+    if len(sys.argv) != client_arg_count:
+        logger.error(f"Expected {client_arg_count} arguments, got {len(sys.argv)}")
+        sys.exit(1)
     if not validate_state(logger):
         sys.exit(1)
 
-    tcp_wrapper()
+    tcp_wrapper(sys.argv[server_ip_arg_index])
 
 
 if __name__ == '__main__':
