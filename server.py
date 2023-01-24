@@ -190,7 +190,6 @@ class TunnelServer:
             if not hasattr(wrapped_packet[layer], "chksum"):
                 continue
             del wrapped_packet[layer].chksum
-        # wrapped_packet = wrapped_packet.__class__(bytes(wrapped_packet))
 
         return wrapped_packet
 
@@ -229,14 +228,6 @@ class TunnelServer:
             )
         )
 
-    def remove_from_active_sessions(self, packet):
-        """
-        Not sure
-        """
-        port_id = packet[TCP].dport
-        if port_id in self.active_session_mapping:
-            self.active_session_mapping.remove(port_id)
-
     def handle_tcp_response(self, packet):
         """
         Send tcp response back to the client.
@@ -248,26 +239,20 @@ class TunnelServer:
         Args:
             packet: Incoming tcp packet
         """
-        try:
-            logger.info("Handling tcp response packet")
-            if not self.tunnel_response_tcp_packet(packet):
-                logger.info("non tunnel tcp response packet received")
-                return
-            logger.info("tunnel response tcp packet received")
-            resp_bytes = base64.encodebytes(bytes(packet[Ether].payload))
-            resp_data = copy.deepcopy(self.get_resp_data_from_active_sessions())
-            # FIN & ACK & RST
-            # if (packet.flags.value & 0x01 != 0 and packet.flags.value & 0x10 != 0) or (packet.flags.value & 0x01 != 0) or (packet.flags.value & 0x04 != 0):
-            #     self.remove_from_active_sessions(packet)
-            dns = resp_data[DNS]
-            resp_data.remove_payload()
-            ip = resp_data[IP]
-            dns_req = IP(dst=ip[IP].src) / UDP(dport=53) / dns / Raw(resp_bytes)
-            logger.info(f"Sending response dns packet from {packet[IP].src}, length is: {len(dns_req)}")
-            send(dns_req, verbose=VERBOSE)
-            logger.info(f"Sent dns response packet from {packet[IP].src}")
-        except:
-            ipdb.post_mortem()
+        logger.info("Handling tcp response packet")
+        if not self.tunnel_response_tcp_packet(packet):
+            logger.info("non tunnel tcp response packet received")
+            return
+        logger.info("tunnel response tcp packet received")
+        resp_bytes = base64.encodebytes(bytes(packet[Ether].payload))
+        resp_data = copy.deepcopy(self.get_resp_data_from_active_sessions())
+        dns = resp_data[DNS]
+        resp_data.remove_payload()
+        ip = resp_data[IP]
+        dns_req = IP(dst=ip[IP].src) / UDP(dport=53) / dns / Raw(resp_bytes)
+        logger.info(f"Sending response dns packet from {packet[IP].src}, length is: {len(dns_req)}")
+        send(dns_req, verbose=VERBOSE)
+        logger.info(f"Sent dns response packet from {packet[IP].src}")
 
     def add_packet_to_active_session(self, tcp_packet):
         """
@@ -298,15 +283,14 @@ class TunnelServer:
             self.handle_real_packet_to_server(dns_packet)
             return
         logger.info("our dns dns_packet received")
-        # ipdb.set_trace()
         if self.source_client == "":
             logger.info("Client connected for the first time - saving source ip")
             self.source_client = dns_packet[IP].src
         # Extract the query data from the dns_packet
         tcp_packet = self.alter_packet_origin(dns_packet)
-        logger.info(f"Sending altered dns_packet to: {tcp_packet[IP].dst}")
+        logger.info(f"Sending altered tcp packet to: {tcp_packet[IP].dst}")
         sendp(tcp_packet, verbose=VERBOSE)
-        logger.info(f"Altered dns_packet SENT: {tcp_packet[IP].dst}")
+        logger.info(f"Altered tcp packet SENT: {tcp_packet[IP].dst}")
         self.add_packet_to_active_session(tcp_packet)
 
 
