@@ -64,5 +64,7 @@ class LocalMachine:
         conf.verb = 1
         self.src_ether = Ether(src=self.my_mac, dst=self.gw_mac)
 
+        self.my_iface = os.popen("ip route get 8.8.8.8 | awk '{print $5}'").read().strip()
+
     def __str__(self):
         return f"My ip: {self.my_ip}, my mac: {self.my_mac}, gw_ip: {self.gw_ip}, gw_mac: {self.gw_mac}"

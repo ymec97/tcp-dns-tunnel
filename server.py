@@ -141,7 +141,7 @@ class TunnelServer:
         """
         logger.info("Starting listening to tcp response packets")
         """ From tunnel/real incoming dns packets """
-        sniff(filter=self.tcp_bpf_filter, iface="ens33", prn=self.handle_tcp_response)
+        sniff(filter=self.tcp_bpf_filter, iface=self.local_machine.my_iface, prn=self.handle_tcp_response)
 
     def serve(self):
         """

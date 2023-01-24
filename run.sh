@@ -23,6 +23,8 @@ MIN_ARG_COUNT=1
 DID_SETUP=0
 EXECUTION_RES=0
 TUN_IP="10.0.0.1"
+ACTIVE_IFACE=$(ip route get 8.8.8.8 | awk '{print $5}')
+ACTIVE_IP_ADDR=$(ip addr show | grep -w $ACTIVE_IFACE |  awk '/inet / {print $2}' | grep -v '127.0.0.1' | cut -f1 -d'/')
 
 
 if [[ $# -lt $MIN_ARG_COUNT ]]
@@ -69,7 +71,7 @@ function cleanup_client {
 	echo "Cleaning up tunnel configuration as client"
 	set -x
 	ip rule delete fwmark 2 table 3
-	iptables -t mangle -D OUTPUT -p tcp -s 192.168.2.107 -j MARK --set-mark 2
+	iptables -t mangle -D OUTPUT -p tcp -s $ACTIVE_IP_ADDR -j MARK --set-mark 2
 	# iptables -t mangle -D PREROUTING -p dns -j MARK --set-mark 2
 	cleanup_tunif
 	echo "Client configuration cleaned"
@@ -83,7 +85,7 @@ function setup_client {
 	ip rule add fwmark 2 table 3 || cleanup
 	DID_SETUP=1
 	# Mark tcp packets outgoing from the local machine with “2” (Using OUTPUT because this is the chain that packets go through when leaving the system)
-	iptables -t mangle -A OUTPUT -p tcp -s 192.168.2.107 -j MARK --set-mark 2 || cleanup
+	iptables -t mangle -A OUTPUT -p tcp -s $ACTIVE_IP_ADDR -j MARK --set-mark 2 || cleanup
 	# iptables -t mangle -A PREROUTING -p dns -j MARK --set-mark 2 || cleanup
 	# Add tun0 ip as the default gw for table 3, so all tcp packets routed with table 3 will be routed to the tun interface
 	ip route add default via "$TUN_IP" table 3 || cleanup

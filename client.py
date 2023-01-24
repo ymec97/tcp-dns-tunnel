@@ -14,7 +14,6 @@ import base64
 import logging
 import struct
 import sys
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from fcntl import ioctl
@@ -33,11 +32,11 @@ from scapy.sendrecv import send, sendp, sniff
 logger = logging.getLogger(__name__)
 
 # set the log level to debug
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # create a console handler and set the log level to debug
 ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
+ch.setLevel(logging.INFO)
 
 # create a formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -179,10 +178,10 @@ def tcp_wrapper():
             logger.info("Handling incoming DNS packet")
             # Check if the packet is a DNS query
             if not packet.haslayer(DNSQR):
-                logger.info("non dns packet received")
+                logger.debug("non dns packet received")
                 return
             if not packet[DNSQR].qname.decode().startswith(OUR_DNS_MAGIC) or not packet.haslayer(Raw):
-                logger.info("real dns packet received")
+                logger.debug("real dns packet received")
                 sendp(Ether(dst=local_machine.gw_mac) / packet, verbose=False)
                 return
 
