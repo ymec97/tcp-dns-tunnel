@@ -30,7 +30,7 @@ from scapy.layers.l2 import Ether
 
 from concurrent.futures import ThreadPoolExecutor
 
-log_level = logging.DEBUG
+log_level = logging.INFO
 logger = logging.getLogger(__name__)
 # set the log level to debug
 logger.setLevel(log_level)
@@ -138,6 +138,7 @@ class TunnelServer:
         Listen for incoming tcp packets
 
         For every incoming tcp packet calls handle_tcp_response
+        which sends the response to the client side of the tunnel
         """
         logger.info("Starting listening to tcp response packets")
         """ From tunnel/real incoming dns packets """
@@ -208,12 +209,14 @@ class TunnelServer:
 
     def get_resp_data_from_active_sessions(self):
         """
-        Not sure
+        Get packet data for a response packet with the tunnel's client information.
+
+        In the future will be client specific for multy client support
         """
 
         return IP(src=self.source_client) / DNS(
             id=0,
-            qd=DNSQR(qname=OUR_DNS_MAGIC + "."),
+            qd=DNSQR(qname=OUR_DNS_MAGIC_DOMAIN_PREFIX),
             aa=1,
             rd=0,
             qr=1,
@@ -222,7 +225,7 @@ class TunnelServer:
             nscount=0,
             arcount=0,
             ar=DNSRR(
-                rrname="DEADBEEF.".encode(),
+                rrname=OUR_DNS_MAGIC_DOMAIN_PREFIX.encode(),
                 type='A',
                 ttl=600
             )
@@ -239,24 +242,28 @@ class TunnelServer:
         Args:
             packet: Incoming tcp packet
         """
-        logger.info("Handling tcp response packet")
+        logger.debug("Handling tcp response packet")
         if not self.tunnel_response_tcp_packet(packet):
-            logger.info("non tunnel tcp response packet received")
+            logger.debug("non tunnel tcp response packet received")
             return
-        logger.info("tunnel response tcp packet received")
+        logger.debug("tunnel response tcp packet received")
         resp_bytes = base64.encodebytes(bytes(packet[Ether].payload))
         resp_data = copy.deepcopy(self.get_resp_data_from_active_sessions())
         dns = resp_data[DNS]
         resp_data.remove_payload()
         ip = resp_data[IP]
         dns_req = IP(dst=ip[IP].src) / UDP(dport=53) / dns / Raw(resp_bytes)
-        logger.info(f"Sending response dns packet from {packet[IP].src}, length is: {len(dns_req)}")
+        logger.debug(f"Sending response dns packet from {packet[IP].src}, length is: {len(dns_req)}")
         send(dns_req, verbose=VERBOSE)
-        logger.info(f"Sent dns response packet from {packet[IP].src}")
+        logger.debug(f"Sent dns response packet from {packet[IP].src}")
 
     def add_packet_to_active_session(self, tcp_packet):
         """
-            Not sure
+            Save the source port to identify tcp responses that are destined to the tunnel by their dest port
+
+            When a packet is returned from a target server, we check if the destination port is for
+            an active session, if so it's for the client side of the tunnel,
+            otherwise it's for the dns tunnel server itself
         """
         src_port = tcp_packet[TCP].sport
         if src_port not in self.active_session_mapping:
@@ -273,24 +280,24 @@ class TunnelServer:
         Args:
             dns_packet: Incoming tcp packet
         """
-        logger.info("Handling dns_packet")
+        logger.debug("Handling dns_packet")
         # Check if the dns_packet is a DNS query
         if not dns_packet.haslayer(DNSQR):
-            logger.info("non dns dns_packet received")
+            logger.debug("non dns dns_packet received")
             return
         if not self.our_dns_packet(dns_packet):
-            logger.info("real dns dns_packet received")
+            logger.debug("real dns dns_packet received")
             self.handle_real_packet_to_server(dns_packet)
             return
-        logger.info("our dns dns_packet received")
+        logger.debug("our dns dns_packet received")
         if self.source_client == "":
-            logger.info("Client connected for the first time - saving source ip")
+            logger.debug("Client connected for the first time - saving source ip")
             self.source_client = dns_packet[IP].src
         # Extract the query data from the dns_packet
         tcp_packet = self.alter_packet_origin(dns_packet)
-        logger.info(f"Sending altered tcp packet to: {tcp_packet[IP].dst}")
+        logger.debug(f"Sending altered tcp packet to: {tcp_packet[IP].dst}")
         sendp(tcp_packet, verbose=VERBOSE)
-        logger.info(f"Altered tcp packet SENT: {tcp_packet[IP].dst}")
+        logger.debug(f"Altered tcp packet SENT: {tcp_packet[IP].dst}")
         self.add_packet_to_active_session(tcp_packet)
 
 

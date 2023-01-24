@@ -154,7 +154,7 @@ def tcp_wrapper(server_ip):
             if not p[IP].haslayer(TCP):
                 continue
 
-            logger.info("Handling outgoing packet")
+            logger.debug("Handling outgoing packet")
             dns_req = IP(dst=server_ip) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(base64.encodebytes(buf))
             logger.debug(f"Original packet:\n {repr(p)}\n")
             logger.debug(f"Crafted DNS packet:\n {repr(dns_req)}\n")
@@ -174,7 +174,7 @@ def tcp_wrapper(server_ip):
             Args:
                 packet: Incoming packet
             """
-            logger.info("Handling incoming DNS packet")
+            logger.debug("Handling incoming DNS packet")
             # Check if the packet is a DNS query
             if not packet.haslayer(DNSQR):
                 logger.debug("non dns packet received")

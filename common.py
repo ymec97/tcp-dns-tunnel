@@ -14,6 +14,8 @@ from scapy.sendrecv import sr
 
 
 OUR_DNS_MAGIC = "DEADBEEF"
+# This will appear on the qname field of the dns query and response
+OUR_DNS_MAGIC_DOMAIN_PREFIX = OUR_DNS_MAGIC + "."
 
 def running_from_script():
     """
