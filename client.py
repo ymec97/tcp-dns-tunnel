@@ -135,38 +135,43 @@ def alter_packet_dst(packet):
     return wrapped_packet
 
 
-def tcp_wrapper(server_ip):
+class TunnelClient:
     """
-    the client side tunnel
+   Class that encapsulate the client side of the client
 
-    Runs the send_thread and recv_thread that responsible for wrapping the outgoing tcp traffic with dns packet
-    and extract the answers from the incoming dns packets.
+   Attributes:
+       interface (TUNInterface class): used to access the tun interface
+       server_ip: the server ip
+       local_machine: Class that hold the information of the local machine
     """
-    interface = TUNInterface()
 
-    def send_thread():
+    def __init__(self, server_ip):
+        self.interface = TUNInterface()
+        self.server_ip = server_ip
+        self.local_machine = LocalMachine()
+
+    def send_thread(self):
         """
         Listen on the tun interface and send every packet wrapped with dns packet
         """
         while time.sleep(0.01) is None:
-            buf = interface.read(1500)
+            buf = self.interface.read(1500)
             p = IP(buf)
             if not p[IP].haslayer(TCP):
                 continue
 
-            logger.debug("Handling outgoing packet")
-            dns_req = IP(dst=server_ip) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(base64.encodebytes(buf))
+            logger.info("Handling outgoing packet")
+            dns_req = IP(dst=self.server_ip) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(
+                base64.encodebytes(buf))
             logger.debug(f"Original packet:\n {repr(p)}\n")
             logger.debug(f"Crafted DNS packet:\n {repr(dns_req)}\n")
             send(dns_req, verbose=False)
 
-    def recv_thread():
+    def recv_thread(self):
         """
-
         Listen on the main interface and every packet that came from the server is extract the answer and
         change the dst addresses and writes it back to the tun interface.
         """
-        local_machine = LocalMachine()
 
         def handle_dns_query(packet):
             """
@@ -181,23 +186,27 @@ def tcp_wrapper(server_ip):
                 return
             if not packet[DNSQR].qname.decode().startswith(OUR_DNS_MAGIC) or not packet.haslayer(Raw):
                 logger.debug("real dns packet received")
-                sendp(Ether(dst=local_machine.gw_mac) / packet, verbose=False)
+                sendp(Ether(dst=self.local_machine.gw_mac) / packet, verbose=False)
                 return
 
             # Extract the query data from the packet
             new_packet = alter_packet_dst(packet)
             logger.debug(f"Answer packet:\n {repr(new_packet)}\n")
-            interface.write(new_packet)
+            self.interface.write(new_packet)
 
         while True:
-                try:
-                    sniff(session=IPSession, filter=f"ip and src not {local_machine.my_ip}", prn=handle_dns_query)
-                except Exception as e:
-                    print(e)
+            try:
+                sniff(session=IPSession, filter=f"ip and src not {self.local_machine.my_ip}", prn=handle_dns_query)
+            except Exception as e:
+                print(e)
 
-    with ThreadPoolExecutor(max_workers=10, thread_name_prefix='tun-') as pool:
-        pool.submit(recv_thread)
-        pool.submit(send_thread)
+    def clien(self):
+        """
+        Executes the recv_thread and the send_thread
+        """
+        with ThreadPoolExecutor(max_workers=10, thread_name_prefix='tun-') as pool:
+            pool.submit(self.recv_thread)
+            pool.submit(self.send_thread)
 
 
 def main():
@@ -212,7 +221,8 @@ def main():
     if not validate_state(logger):
         sys.exit(1)
 
-    tcp_wrapper(sys.argv[server_ip_arg_index])
+    client = TunnelClient(sys.argv[server_ip_arg_index])
+    client.clien()
 
 
 if __name__ == '__main__':
