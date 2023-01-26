@@ -160,7 +160,7 @@ class TunnelClient:
             if not p[IP].haslayer(TCP):
                 continue
 
-            logger.info("Handling outgoing packet")
+            logger.debug("Handling outgoing packet")
             dns_req = IP(dst=self.server_ip) / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname=OUR_DNS_MAGIC)) / Raw(
                 base64.encodebytes(buf))
             logger.debug(f"Original packet:\n {repr(p)}\n")
