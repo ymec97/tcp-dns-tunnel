@@ -12,18 +12,14 @@ This module runs 2 threads:
 import base64
 import copy
 import threading
-
-import ipdb
-
 import logging
-
+from concurrent.futures import ThreadPoolExecutor
 import sys
-
-from scapy.packet import Raw
-from scapy.sendrecv import sniff, send, sendp
 
 from common import *
 
+from scapy.packet import Raw
+from scapy.sendrecv import sniff, send, sendp
 from scapy.layers.dns import DNS, DNSRR, DNSQR
 from scapy.layers.inet import IP, UDP, TCP
 from scapy.layers.l2 import Ether
