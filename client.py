@@ -186,7 +186,7 @@ class TunnelClient:
                 return
             if not packet[DNSQR].qname.decode().startswith(OUR_DNS_MAGIC) or not packet.haslayer(Raw):
                 logger.debug("real dns packet received")
-                sendp(Ether(dst=self.local_machine.gw_mac) / packet, verbose=False)
+                sendp(Ether(dst=self.local_machine.my_mac) / packet, verbose=False)
                 return
 
             # Extract the query data from the packet

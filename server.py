@@ -127,7 +127,7 @@ class TunnelServer:
         """
         """ From tunnel/real incoming dns packets """
         logger.info("Starting listening to tunnel dns packets")
-        sniff(filter=self.dns_bpf_filter, iface="ens33", prn=self.handle_dns_query)
+        sniff(filter=self.dns_bpf_filter, iface=self.local_machine.my_iface, prn=self.handle_dns_query)
 
     def _listen_tcp(self):
         """
@@ -201,7 +201,7 @@ class TunnelServer:
         Args:
               packet: Incoming dns packet
         """
-        sendp(Ether(dst=self.local_machine.gw_mac) / packet, verbose=VERBOSE)
+        sendp(Ether(dst=self.local_machine.my_mac) / packet, verbose=VERBOSE)
 
     def get_resp_data_from_active_sessions(self):
         """
