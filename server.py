@@ -59,7 +59,6 @@ class TunnelServer:
         tcp_bpf_filter: filter that used inorder to catch tcp packets that the server is the destination
         active_session_mapping:
     """
-    TUNNEL_INTERFACE = "tun0"
 
     def __init__(self):
         """
