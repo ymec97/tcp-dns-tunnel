@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>client module &#8212; TCP TUNNEL OVER DNS 1.0 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-client">
+<span id="client-module"></span><h1>client module<a class="headerlink" href="#module-client" title="Permalink to this heading">¶</a></h1>
+<p>Module for the client side of the tunnel</p>
+<dl class="simple">
+<dt>This module runs 2 threads:</dt><dd><ul class="simple">
+<li><dl class="simple">
+<dt>send_thread - This thread is listening on the tun0 interface.</dt><dd><p>for every packet it reads from the interface the thread create dns query packet, concatenate
+the packet it read with the dns packet and send the dns packet to the server.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>recv_thread - This thread is listening on the interface that has access to the network.</dt><dd><p>for every packet that it reads that came from the server the thread extract from it the actual
+answer and write it back to the tun interface.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</dd>
+</dl>
+<dl class="py class">
+<dt class="sig sig-object py" id="client.TUNInterface">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">client.</span></span><span class="sig-name descname"><span class="pre">TUNInterface</span></span><a class="headerlink" href="#client.TUNInterface" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Class that encapsulate the access for the tun interface</p>
+<dl class="simple">
+<dt>Attributes:</dt><dd><p>_descriptor (IO): The file descriptor for the interface</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="client.TUNInterface.read">
+<span class="sig-name descname"><span class="pre">read</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">number_bytes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bytes</span></span></span><a class="headerlink" href="#client.TUNInterface.read" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reads number_bytes from the tun interface</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>number_bytes: number of bytes to read</p>
+</dd>
+<dt>Returns:</dt><dd><p>bytes: bytes we read</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="client.TUNInterface.write">
+<span class="sig-name descname"><span class="pre">write</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bytes</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="headerlink" href="#client.TUNInterface.write" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes packet back to the tun interface</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>packet (bytes): packet in bytes representation</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="client.TunnelClient">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">client.</span></span><span class="sig-name descname"><span class="pre">TunnelClient</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">server_ip</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#client.TunnelClient" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Class that encapsulate the client side of the client</p>
+<dl class="simple">
+<dt>Attributes:</dt><dd><p>interface (TUNInterface class): used to access the tun interface
+server_ip: the server ip
+local_machine: Class that hold the information of the local machine</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="client.TunnelClient.clien">
+<span class="sig-name descname"><span class="pre">clien</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.TunnelClient.clien" title="Permalink to this definition">¶</a></dt>
+<dd><p>Executes the recv_thread and the send_thread</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="client.TunnelClient.recv_thread">
+<span class="sig-name descname"><span class="pre">recv_thread</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.TunnelClient.recv_thread" title="Permalink to this definition">¶</a></dt>
+<dd><p>Listen on the main interface and every packet that came from the server is extract the answer and
+change the dst addresses and writes it back to the tun interface.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="client.TunnelClient.send_thread">
+<span class="sig-name descname"><span class="pre">send_thread</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.TunnelClient.send_thread" title="Permalink to this definition">¶</a></dt>
+<dd><p>Listen on the tun interface and send every packet wrapped with dns packet</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="client.alter_packet_dst">
+<span class="sig-prename descclassname"><span class="pre">client.</span></span><span class="sig-name descname"><span class="pre">alter_packet_dst</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packet</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#client.alter_packet_dst" title="Permalink to this definition">¶</a></dt>
+<dd><p>Change the packet dst addresses (mac and ip)</p>
+<p>This function is used on the recv_thread, the answers that we get from the server are with the server as
+the destination, so in order for the applications that run on the client host to accept the answers we need
+to change the destination to be ourselves.</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>packet: the dns packet that contains the answer</p>
+</dd>
+<dt>Returns:</dt><dd><p>packet: the answer after changing the dst to be ourselves</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="client.extract_wrapped_packet_bytes">
+<span class="sig-prename descclassname"><span class="pre">client.</span></span><span class="sig-name descname"><span class="pre">extract_wrapped_packet_bytes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">packet</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#client.extract_wrapped_packet_bytes" title="Permalink to this definition">¶</a></dt>
+<dd><p>Extract the actual data from the dns packet</p>
+<dl class="simple">
+<dt>Args:</dt><dd><p>packet: the dns packet we use as tunnel</p>
+</dd>
+<dt>Returns:</dt><dd><p>the actual bytes of the tcp packet</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="client.main">
+<span class="sig-prename descclassname"><span class="pre">client.</span></span><span class="sig-name descname"><span class="pre">main</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#client.main" title="Permalink to this definition">¶</a></dt>
+<dd><p>Main entry point of the client side tunnel.</p>
+</dd></dl>
+
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">TCP TUNNEL OVER DNS</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2023, Yarden Cohen, Shani Yosef.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 6.1.3</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.13</a>
+      
+      |
+      <a href="_sources/client.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
